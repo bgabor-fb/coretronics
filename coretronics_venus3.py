@@ -1,3 +1,4 @@
+from matplotlib.transforms import BlendedAffine2D
 import serial
 from serial.tools import list_ports
 import crcmod    # if you encounter an error here, pip install crcmod
@@ -85,8 +86,16 @@ class coretronics_venus3:
         while 1:
             c = self.ser.read()
             assert len(c)>0, "Response timeout!" 
-            if c==eol: return ret
-            ret += c
+            if c==eol: 
+                return ret
+            # Responses can be inconsistent. Sometimes /n/r terminated 
+            # debug messages are printed onto the UART. In debug mode, 
+            # print these messages to the console, otherwise discard.
+            if c == b'\r': 
+                if __debug__: print(ret[:-1].decode())
+                ret = b''
+            else:
+                ret += c
 
     def _read_response(self, cmd_id, channel, expect_only_ACK=False):       
         response = ""
@@ -146,7 +155,7 @@ class coretronics_venus3:
     TEST_PATTERN_GENERATOR  = 1
     SPLASH_SCREEN           = 2
 
-    def set_input_source(self, channel, source):
+    def set_input_source(self, source, channel = LEFT):
         """ Selects source for DLP(s)
             parameters:
                 channel: LEFT, RIGHT or BOTH
@@ -163,7 +172,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
 
-    def get_input_source(self, channel):
+    def get_input_source(self, channel = LEFT):
         """ Reads input source setting from the DLP
             parameters:
                 channel: LEFT, RIGHT 
@@ -195,7 +204,7 @@ class coretronics_venus3:
     VERTICAL_LINES          = 13
     DIAGONAL_LINES          = 14
 
-    def set_test_pattern(self, channel, pattern):
+    def set_test_pattern(self, pattern, channel = LEFT):
         """ Selects test pattern for DLP(s)
             parameters:
                 channel: LEFT, RIGHT or BOTH
@@ -212,7 +221,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
 
-    def set_image_orientation(self, channel, flip_x, flip_y, rot_90):
+    def set_image_orientation(self, flip_x, flip_y, rot_90, channel = LEFT):
         """ Sets image orientation for the DLP(s)
             parameters:
                 channel: LEFT, RIGHT or BOTH
@@ -232,7 +241,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
     
-    def get_image_orientation(self, channel):
+    def get_image_orientation(self, channel = LEFT):
         """ Reads current image orientation of a DLP
             parameters:
                 channel: LEFT, RIGHT
@@ -251,7 +260,7 @@ class coretronics_venus3:
         rot_90 = (byte & 1) > 0
         return flip_x, flip_y, rot_90
     
-    def set_image_freeze(self, channel, freeze_enabled):
+    def set_image_freeze(self, freeze_enabled, channel = LEFT):
         """ Freezes / unfreezes image on the DLP(s)
             parameters:
                 channel: LEFT, RIGHT or BOTH
@@ -267,7 +276,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
     
-    def get_image_freeze(self, channel):
+    def get_image_freeze(self, channel = LEFT):
         """ Reads the image freezing setting of a DLP.
             parameters:
                 channel: LEFT, RIGHT
@@ -282,7 +291,7 @@ class coretronics_venus3:
         freeze_enabled = (byte & 1) > 0
         return freeze_enabled
 
-    def set_look(self, channel, look_id):
+    def set_look(self, look_id, channel = LEFT):
         """ Sets proprietary display tonality preset
             parameters:
                 look_id: byte
@@ -297,7 +306,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
     
-    def get_look(self, channel):
+    def get_look(self, channel = LEFT):
         """ Reads the image freezing setting of a DLP.
             parameters:
                 channel: LEFT, RIGHT
@@ -315,7 +324,7 @@ class coretronics_venus3:
         frame_rate_int = byte_list[2] + (byte_list[3] << 8) +(byte_list[4] << 16) + (byte_list[5] << 24)
         return look_id, sequence_id, frame_rate_int
 
-    def set_RGB_duty_cycle(self, channel, R, G, B):
+    def set_RGB_duty_cycle(self, R, G, B, channel = LEFT):
         """ Writes R,G,B LED duty cycles of attached DLPs.
             !!!! This is an undocumented feature !!!!
             parameters:
@@ -331,7 +340,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
 
-    def get_RGB_duty_cycle(self, channel):
+    def get_RGB_duty_cycle(self, channel = LEFT):
         """ Reads R,G,B LED duty cycles from attached DLP.
             parameters:
                 channel: LEFT or RIGHT
@@ -344,7 +353,39 @@ class coretronics_venus3:
         byte_list = self._read_response(cmd_id, channel)
         return self._get_rgb(byte_list)
 
-    def set_CAIC_enable(self, channel, CAIC_enabled):
+    
+    def set_gamma(self, gamma_table_index, channel = LEFT):
+        """ Freezes / unfreezes image on the DLP(s)
+            parameters:
+                channel: LEFT, RIGHT or BOTH
+                gamma_table_index: 4 bit value to gamma select one of the predefined gamma look-up tables.
+            returns:
+                None
+        """
+        assert channel == self.LEFT or channel == self.RIGHT or channel == self.BOTH
+        assert isinstance(gamma_table_index, int), ValueError("Index should be an integer!")
+        assert 0 <= gamma_table_index <= 15, ValueError("Max index is 15!")
+
+        cmd_id = 0x27
+        self._send_command(cmd_id, bytes([gamma_table_index]), channel)
+        void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
+        return void
+    
+    def get_gamma(self, channel = LEFT):
+        """ Reads the image freezing setting of a DLP.
+            parameters:
+                channel: LEFT, RIGHT
+            returns:
+                gamma_table_index: 4 bit value to gamma select one of the predefined gamma look-up tables.
+        """
+        assert channel == self.LEFT or channel == self.RIGHT
+        cmd_id = 0x28
+        self._send_command(cmd_id, bytes(), channel)
+        byte_list = self._read_response(cmd_id, channel)
+        gamma_table_index = byte_list[0]
+        return gamma_table_index
+
+    def set_CAIC_enable(self, CAIC_enabled, channel = LEFT):
         """ Enables or disables the Content Adaptive Illumination Control (CAIC) in the TI DLP controller.
             More information: https://www.ti.com/lit/an/dlpa058/dlpa058.pdf 
             parameters:
@@ -361,7 +402,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
     
-    def get_CAIC_enable(self, channel):
+    def get_CAIC_enable(self, channel = LEFT):
         """ Reads Content Adaptive Illumination Control (CAIC) enablement status.
             parameters:
                 channel: LEFT, RIGHT
@@ -375,7 +416,7 @@ class coretronics_venus3:
         byte_list = self._read_response(cmd_id, channel)
         return (byte_list[0] & 1) > 0
 
-    def set_RGB_enable(self, channel, red_enabled, green_enabled, blue_enabled):
+    def set_RGB_enable(self, red_enabled, green_enabled, blue_enabled, channel = LEFT):
         """ Enables or disables the individual R,G,B LEDs in the DLP light engine.
             parameters:
                 channel: LEFT, RIGHT or BOTH
@@ -395,7 +436,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
     
-    def get_RGB_enable(self, channel):
+    def get_RGB_enable(self, channel = LEFT):
         """ Reads enablement status of the red, green, and blue LEDs in the DLP selected.
             parameters:
                 channel: LEFT, RIGHT
@@ -414,23 +455,25 @@ class coretronics_venus3:
         blue_enabled =  (byte & 0x04) > 0 
         return red_enabled, green_enabled, blue_enabled
 
-    def set_RGB_currents(self, channel, R, G, B):
+    def set_RGB_currents(self, Red_current, Green_current, Blue_current, channel = LEFT):
         """ Writes R,G,B LED currents for attached DLPs.
             parameters:
                 channel: LEFT, RIGHT, or BOTH
-                R,G,B: uint16s, proportional to LED currents.
+                Red_current:   uint16, proportional to Red LED current.
+                Green_current: uint16, proportional to Green LED current.
+                Blue_current:  uint16, proportional to Blue LED current.
         """
-        for c in [R,G,B]:
+        for c in [Red_current, Green_current, Blue_current]:
             assert isinstance(c, int), ValueError("R,G,B should be integers!")
             assert (c>=12) and (c<=350), ValueError("R,G,B should be in the range of [12..350]!")
 
         cmd_id = 0x54
-        payload = self._set_rgb(R,G,B)
+        payload = self._set_rgb(Red_current, Green_current, Blue_current)
         self._send_command(cmd_id, payload, channel)
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
 
-    def get_RGB_currents(self, channel):
+    def get_RGB_currents(self, channel = LEFT):
         """ Reads R,G,B LED currents from attached DLPs.
             parameters:
                 channel: LEFT or RIGHT
@@ -443,7 +486,7 @@ class coretronics_venus3:
         byte_list = self._read_response(cmd_id, channel)
         return self._get_rgb(byte_list)
 
-    def set_brightness_boost(self, channel, sharpness, LABB_control, LABB_manual_setting):
+    def set_brightness_boost(self, sharpness, LABB_control, LABB_manual_setting, channel = LEFT):
         """ Write control parameters for the TI DLP Local Area Brightness Boost (LABB) algorithm.
             More information: https://www.ti.com/lit/an/dlpa058/dlpa058.pdf
             parameters:
@@ -464,7 +507,7 @@ class coretronics_venus3:
         void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
         return void
 
-    def get_brightness_boost(self, channel):
+    def get_brightness_boost(self, channel = LEFT):
         """ Read control parameters for the TI DLP Local Area Brightness Boost (LABB) algorithm.
             More information: https://www.ti.com/lit/an/dlpa058/dlpa058.pdf
             parameters:
@@ -486,7 +529,7 @@ class coretronics_venus3:
         LABB_gain = byte_list[2]
         return [sharpness, LABB_control, LABB_manual_setting, LABB_gain]
 
-    def get_ASIC_device_ID(self, channel):
+    def get_ASIC_device_ID(self, channel = LEFT):
         """ Reads DLP driver device ID.
             parameters:
                 channel: LEFT or RIGHT
@@ -510,7 +553,7 @@ class coretronics_venus3:
     DMD_WVGA = "64000D60"
     DMD_720p = "68000D60"
     DMD_ours = "72000D60"
-    def get_DMD_device_ID(self, channel):
+    def get_DMD_device_ID(self, channel = LEFT):
         """ Reads DMD device ID and type
             parameters:
                 channel: LEFT or RIGHT
@@ -526,7 +569,7 @@ class coretronics_venus3:
         type = (byte_list[3] << 24) + (byte_list[2] << 16) + (byte_list[1] << 8) + byte_list[0]
         return device_id, hex(type)[2:].upper()
 
-    def get_DLP_flash_version(self, channel):
+    def get_DLP_flash_version(self, channel = LEFT):
         """ Reads DMD device ID and type
             parameters:
                 channel: LEFT or RIGHT
@@ -541,28 +584,76 @@ class coretronics_venus3:
         version = "{0}.{1}.{2}".format( byte_list[3], byte_list[2], hex((byte_list[1] << 8) + byte_list[0])[2:].upper())
         return version
 
+    def write_tint_to_flash(self, look_id, Red_current, Green_current, Blue_current, channel = LEFT):
+        """ Write look_id and LED drive currents to flash, changing default display tint after DLP boot.
+            parameters:
+                look_id: byte
+                Red_current:   uint16, proportional to Red LED current.
+                Green_current: uint16, proportional to Green LED current.
+                Blue_current:  uint16, proportional to Blue LED current.
+            returns:
+                None
+        """
+        assert channel == self.LEFT or channel == self.RIGHT or channel == self.BOTH
+        assert isinstance(look_id, int), ValueError("look_id should be integer!")
+        assert 0 <= look_id <= 255, ValueError("look_id should be in the range of [0..255]!")
+        for c in [Red_current, Green_current, Blue_current]:
+            assert isinstance(c, int), ValueError("R,G,B should be integers!")
+            assert (c>=12) and (c<=350), ValueError("R,G,B should be in the range of [12..350]!")
+
+        cmd_id = 0xF9
+        payload = bytearray([look_id]) + self._set_rgb(Red_current, Green_current, Blue_current)
+        self._send_command(cmd_id, payload, channel)
+        void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
+        return void
+
+    def write_orientation_to_flash(self, flip_x, flip_y, channel = LEFT):
+        """ Commit image orientation for the DLP(s) to flash,
+            changing default display orientation  after DLP boot.
+            parameters:
+                channel: LEFT, RIGHT or BOTH
+                flip_x: True or 1 indicates that the image needs to be flipped along the long axis.
+                flip_y: True or 1indicates that the image needs to be flipped along the short axis.
+            returns:
+                None
+        """
+        assert channel == self.LEFT or channel == self.RIGHT or channel == self.BOTH
+        byte = 0
+        if flip_y: byte += 4
+        if flip_x: byte += 2
+        cmd_id = 0xFA
+        self._send_command(cmd_id, bytes([0, byte]), channel)
+        void = self._read_response(cmd_id, channel, expect_only_ACK=True)        
+        return void
+ 
 # ---------------------------------------------------
 # Demonstrate / test the coretronics_venus3 class
 # ---------------------------------------------------
 if __name__ == "__main__":
     dlp = coretronics_venus3()
     if dlp.isOpen:
+        gamma_index = dlp.get_gamma()
+        dlp.set_gamma( 2 )
+        dlp.set_RGB_currents( Red_current = 20, Green_current = 200, Blue_current = 20)
+        look_id, sequence_id, frame_rate_int = dlp.get_look()
+        # Test bule overdrive:
+        dlp.write_tint_to_flash(look_id, Red_current = 200, Green_current = 200, Blue_current = 260)
         DLP_driver_device_ID = dlp.get_ASIC_device_ID(dlp.LEFT)
         DMD_driver_device_ID, type = dlp.get_DMD_device_ID(dlp.LEFT)
         DLP_Flash_Version = dlp.get_DLP_flash_version(dlp.LEFT)
-        dlp.set_image_orientation( dlp.LEFT, flip_x=True, flip_y=False, rot_90=False )
-        look_id, sequence_id, frame_rate_int = dlp.get_look(dlp.LEFT)
-        dlp.set_look(dlp.LEFT, 1)
-        CAIC_enabled = dlp.get_CAIC_enable(dlp.LEFT)
-        dlp.set_CAIC_enable(dlp.LEFT, True)
-        flip_x, flip_y, rot_90 = dlp.get_image_orientation(dlp.LEFT)
-        dlp.set_input_source(dlp.LEFT, dlp.TEST_PATTERN_GENERATOR)
-        print(dlp.get_input_source(dlp.LEFT))
-        dlp.set_test_pattern(dlp.LEFT, dlp.COLOR_BARS)
-        dlp.set_RGB_currents(dlp.LEFT, 200, 200, 200)
-        print( dlp.get_RGB_currents(dlp.LEFT) )
-        dlp.set_input_source(dlp.LEFT, dlp.EXTERNAL_VIDEO_PORT)
-        frozen = dlp.get_image_freeze(dlp.LEFT)
-        dlp.set_image_freeze(dlp.LEFT, freeze_enabled=True)
-        frozen = dlp.get_image_freeze(dlp.LEFT)
-        dlp.set_image_freeze(dlp.LEFT, freeze_enabled=False)
+        dlp.write_orientation_to_flash(flip_x = True, flip_y = True)
+        dlp.set_image_orientation( flip_x=True, flip_y=False, rot_90=False )
+        dlp.set_look(1)
+        CAIC_enabled = dlp.get_CAIC_enable()
+        dlp.set_CAIC_enable(True)
+        flip_x, flip_y, rot_90 = dlp.get_image_orientation()
+        dlp.set_input_source(dlp.TEST_PATTERN_GENERATOR)
+        print(dlp.get_input_source())
+        dlp.set_test_pattern(dlp.COLOR_BARS)
+        dlp.set_RGB_currents(200, 200, 200)
+        print( dlp.get_RGB_currents() )
+        dlp.set_input_source(dlp.EXTERNAL_VIDEO_PORT)
+        frozen = dlp.get_image_freeze()
+        dlp.set_image_freeze( freeze_enabled=True)
+        frozen = dlp.get_image_freeze()
+        dlp.set_image_freeze(freeze_enabled=False)
